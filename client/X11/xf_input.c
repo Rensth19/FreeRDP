@@ -142,24 +142,27 @@ static BOOL register_input_events(xfContext* xfc, Window window)
 					{
 						double max_pressure = t->max;
 
-						if (strstr(dev->name, "Stylus Pen") || strstr(dev->name, "Pen Pen"))
+						char devName[200];
+						strncpy(devName, dev->name, 200);
+						devName[200 - 1] = '\0';
+						CharLowerBuffA(devName, (DWORD)strlen(devName));
+
+						if (strstr(devName, "eraser") != NULL)
 						{
-							if (!freerdp_client_handle_pen(
+							if (freerdp_client_handle_pen(&xfc->common,
+							                              FREERDP_PEN_REGISTER |
+							                                  FREERDP_PEN_IS_INVERTED |
+							                                  FREERDP_PEN_HAS_PRESSURE,
+							                              dev->deviceid, max_pressure))
+								WLog_DBG(TAG, "registered eraser");
+						}
+						else if (strstr(devName, "stylus") != NULL ||
+						         strstr(devName, "pen") != NULL)
+						{
+							if (freerdp_client_handle_pen(
 							        &xfc->common, FREERDP_PEN_REGISTER | FREERDP_PEN_HAS_PRESSURE,
 							        dev->deviceid, max_pressure))
-								return FALSE;
-							WLog_DBG(TAG, "registered pen");
-						}
-						else if (strstr(dev->name, "Stylus Eraser") ||
-						         strstr(dev->name, "Pen Eraser"))
-						{
-							if (!freerdp_client_handle_pen(&xfc->common,
-							                               FREERDP_PEN_REGISTER |
-							                                   FREERDP_PEN_IS_INVERTED |
-							                                   FREERDP_PEN_HAS_PRESSURE,
-							                               dev->deviceid, max_pressure))
-								return FALSE;
-							WLog_DBG(TAG, "registered eraser");
+								WLog_DBG(TAG, "registered pen");
 						}
 					}
 					break;
@@ -682,13 +685,13 @@ static int xf_input_touch_remote(xfContext* xfc, XIDeviceEvent* event, int evtyp
 	return 0;
 }
 
-static int xf_input_pen_remote(xfContext* xfc, XIDeviceEvent* event, int evtype, int deviceid)
+static BOOL xf_input_pen_remote(xfContext* xfc, XIDeviceEvent* event, int evtype, int deviceid)
 {
 	int x, y;
 	RdpeiClientContext* rdpei = xfc->common.rdpei;
 
 	if (!rdpei)
-		return 0;
+		return FALSE;
 
 	xf_input_hide_cursor(xfc);
 	x = (int)event->event_x;
@@ -707,30 +710,43 @@ static int xf_input_pen_remote(xfContext* xfc, XIDeviceEvent* event, int evtype,
 		}
 	}
 
+	UINT32 flags = FREERDP_PEN_HAS_PRESSURE;
+	if ((evtype == XI_ButtonPress) || (evtype == XI_ButtonRelease))
+	{
+		WLog_DBG(TAG, "pen button %d", event->detail);
+		switch (event->detail)
+		{
+			case 1:
+				break;
+			case 3:
+				flags |= FREERDP_PEN_BARREL_PRESSED;
+				break;
+			default:
+				return FALSE;
+		}
+	}
+
 	switch (evtype)
 	{
 		case XI_ButtonPress:
-			if (!freerdp_client_handle_pen(&xfc->common,
-			                               FREERDP_PEN_PRESS | FREERDP_PEN_HAS_PRESSURE, deviceid,
-			                               x, y, pressure))
+			flags |= FREERDP_PEN_PRESS;
+			if (!freerdp_client_handle_pen(&xfc->common, flags, deviceid, x, y, pressure))
 				return FALSE;
 			break;
 		case XI_Motion:
-			if (!freerdp_client_handle_pen(&xfc->common,
-			                               FREERDP_PEN_MOTION | FREERDP_PEN_HAS_PRESSURE, deviceid,
-			                               x, y, pressure))
+			flags |= FREERDP_PEN_MOTION;
+			if (!freerdp_client_handle_pen(&xfc->common, flags, deviceid, x, y, pressure))
 				return FALSE;
 			break;
 		case XI_ButtonRelease:
-			if (!freerdp_client_handle_pen(&xfc->common,
-			                               FREERDP_PEN_RELEASE | FREERDP_PEN_HAS_PRESSURE, deviceid,
-			                               x, y, pressure))
+			flags |= FREERDP_PEN_RELEASE;
+			if (!freerdp_client_handle_pen(&xfc->common, flags, deviceid, x, y, pressure))
 				return FALSE;
 			break;
 		default:
 			break;
 	}
-	return 0;
+	return TRUE;
 }
 
 static int xf_input_pens_unhover(xfContext* xfc)
@@ -878,7 +894,11 @@ static int xf_input_handle_event_remote(xfContext* xfc, const XEvent* event)
 
 				if (freerdp_client_is_pen(&xfc->common, deviceid))
 				{
-					xf_input_pen_remote(xfc, cookie.cc->data, cookie.cc->evtype, deviceid);
+					if (!xf_input_pen_remote(xfc, cookie.cc->data, cookie.cc->evtype, deviceid))
+					{
+						// XXX: don't show cursor
+						xf_input_event(xfc, event, cookie.cc->data, cookie.cc->evtype);
+					}
 					break;
 				}
 			}

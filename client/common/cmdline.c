@@ -1560,7 +1560,8 @@ int freerdp_client_settings_command_line_status_print_ex(rdpSettings* settings, 
 					val = &arg->Value[9];
 				else if (!option_equals("kbd-lang", arg->Value))
 					return COMMAND_LINE_ERROR_UNEXPECTED_VALUE;
-				else if (strchr(val, ','))
+
+				if (val && strchr(val, ','))
 					return COMMAND_LINE_ERROR_UNEXPECTED_VALUE;
 				freerdp_client_print_codepages(val);
 			}
@@ -1970,7 +1971,7 @@ static int parse_gfx_options(rdpSettings* settings, const COMMAND_LINE_ARGUMENT_
 	WINPR_ASSERT(settings);
 	WINPR_ASSERT(arg);
 
-	if (!freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, TRUE))
+	if (!freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, (arg->Value != NULL)))
 		return COMMAND_LINE_ERROR;
 
 	if (arg->Value)
@@ -3738,7 +3739,10 @@ static int freerdp_client_settings_parse_command_line_arguments_int(rdpSettings*
 			if (option_equals(arg->Value, "video"))
 				settings->RemoteFxCodecMode = 0x00;
 			else if (option_equals(arg->Value, "image"))
+			{
+				settings->RemoteFxImageCodec = TRUE;
 				settings->RemoteFxCodecMode = 0x02;
+			}
 		}
 		CommandLineSwitchCase(arg, "frame-ack")
 		{
@@ -3790,6 +3794,21 @@ static int freerdp_client_settings_parse_command_line_arguments_int(rdpSettings*
 			settings->SendPreconnectionPdu = TRUE;
 			settings->PreconnectionId = (UINT32)val;
 		}
+#ifdef _WIN32
+		CommandLineSwitchCase(arg, "connect-child-session")
+		{
+			if (!freerdp_settings_set_string(settings, FreeRDP_AuthenticationServiceClass,
+			                                 "vs-debug") ||
+			    !freerdp_settings_set_string(settings, FreeRDP_ServerHostname, "localhost") ||
+			    !freerdp_settings_set_string(settings, FreeRDP_AuthenticationPackageList, "ntlm") ||
+			    !freerdp_settings_set_bool(settings, FreeRDP_NegotiateSecurityLayer, FALSE) ||
+			    !freerdp_settings_set_bool(settings, FreeRDP_VmConnectMode, TRUE) ||
+			    !freerdp_settings_set_bool(settings, FreeRDP_ConnectChildSession, TRUE) ||
+			    !freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, TRUE) ||
+			    !freerdp_settings_set_uint32(settings, FreeRDP_AuthenticationLevel, 0))
+				return COMMAND_LINE_ERROR_MEMORY;
+		}
+#endif
 		CommandLineSwitchCase(arg, "sec")
 		{
 			size_t count = 0, x;

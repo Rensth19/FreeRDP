@@ -88,6 +88,7 @@ static void set_default_callbacks(freerdp* instance)
 	instance->PresentGatewayMessage = client_cli_present_gateway_message;
 	instance->LogonErrorInfo = client_cli_logon_error_info;
 	instance->GetAccessToken = client_cli_get_access_token;
+	instance->RetryDialog = client_common_retry_dialog;
 }
 
 static BOOL freerdp_client_common_new(freerdp* instance, rdpContext* context)
@@ -1189,6 +1190,48 @@ cleanup:
 #endif
 }
 
+SSIZE_T client_common_retry_dialog(freerdp* instance, const char* what, size_t current,
+                                   void* userarg)
+{
+	WINPR_UNUSED(instance);
+	WINPR_ASSERT(instance->context);
+	WINPR_UNUSED(userarg);
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(what);
+
+	if (strcmp(what, "arm-transport") != 0)
+	{
+		WLog_ERR(TAG, "Unknown module %s, aborting", what);
+		return -1;
+	}
+
+	if (current == 0)
+		WLog_INFO(TAG, "[%s] Starting your VM. It may take up to 5 minutes", what);
+
+	const rdpSettings* settings = instance->context->settings;
+	const BOOL enabled = freerdp_settings_get_bool(settings, FreeRDP_AutoReconnectionEnabled);
+	if (!enabled)
+	{
+		WLog_WARN(TAG, "Automatic reconnection disabled, terminating. Try to connect again later");
+		return -1;
+	}
+
+	const size_t max = freerdp_settings_get_uint32(settings, FreeRDP_AutoReconnectMaxRetries);
+	const size_t delay = freerdp_settings_get_uint32(settings, FreeRDP_TcpConnectTimeout);
+	if (current >= max)
+	{
+		WLog_ERR(TAG,
+		         "[%s] retries exceeded. Your VM failed to start. Try again later or contact your "
+		         "tech support for help if this keeps happening.",
+		         what);
+		return -1;
+	}
+
+	WLog_INFO(TAG, "[%s] retry %" PRIuz "/%" PRIuz ", delaying %" PRIuz "ms before next attempt",
+	          what, current, max, delay);
+	return delay;
+}
+
 BOOL client_auto_reconnect(freerdp* instance)
 {
 	return client_auto_reconnect_ex(instance, NULL);
@@ -1673,6 +1716,11 @@ static BOOL freerdp_handle_touch_up(rdpClientContext* cctx, const FreeRDP_TouchC
 			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
 			                                ? CONTACT_DATA_PRESSURE_PRESENT
 			                                : 0;
+			// Ensure contact position is unchanged from "engaged" to "out of range" state
+			rdpei->TouchRawEvent(rdpei, contact->id, contact->x, contact->y, &contactId,
+			                     RDPINPUT_CONTACT_FLAG_UPDATE | RDPINPUT_CONTACT_FLAG_INRANGE |
+			                         RDPINPUT_CONTACT_FLAG_INCONTACT,
+			                     contactFlags, contact->pressure);
 			rdpei->TouchRawEvent(rdpei, contact->id, contact->x, contact->y, &contactId, flags,
 			                     contactFlags, contact->pressure);
 		}
@@ -1716,7 +1764,8 @@ static BOOL freerdp_handle_touch_down(rdpClientContext* cctx, const FreeRDP_Touc
 
 		if (rdpei->TouchRawEvent)
 		{
-			const UINT32 flags = RDPINPUT_CONTACT_FLAG_DOWN;
+			const UINT32 flags = RDPINPUT_CONTACT_FLAG_DOWN | RDPINPUT_CONTACT_FLAG_INRANGE |
+			                     RDPINPUT_CONTACT_FLAG_INCONTACT;
 			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
 			                                ? CONTACT_DATA_PRESSURE_PRESENT
 			                                : 0;
@@ -1760,7 +1809,8 @@ static BOOL freerdp_handle_touch_motion(rdpClientContext* cctx, const FreeRDP_To
 
 		if (rdpei->TouchRawEvent)
 		{
-			const UINT32 flags = RDPINPUT_CONTACT_FLAG_UPDATE;
+			const UINT32 flags = RDPINPUT_CONTACT_FLAG_UPDATE | RDPINPUT_CONTACT_FLAG_INRANGE |
+			                     RDPINPUT_CONTACT_FLAG_INCONTACT;
 			const UINT32 contactFlags = ((contact->flags & FREERDP_TOUCH_HAS_PRESSURE) != 0)
 			                                ? CONTACT_DATA_PRESSURE_PRESENT
 			                                : 0;
@@ -1977,6 +2027,26 @@ BOOL freerdp_client_handle_pen(rdpClientContext* cctx, UINT32 flags, INT32 devic
 	}
 	va_end(args);
 
+	if ((flags & FREERDP_PEN_PRESS) != 0)
+	{
+		// Ensure that only one button is pressed
+		if (pen->pressed)
+			flags = FREERDP_PEN_MOTION |
+			        (flags & (UINT32) ~(FREERDP_PEN_PRESS | FREERDP_PEN_BARREL_PRESSED));
+		else if ((flags & FREERDP_PEN_BARREL_PRESSED) != 0)
+			pen->flags |= FREERDP_PEN_BARREL_PRESSED;
+	}
+	else if ((flags & FREERDP_PEN_RELEASE) != 0)
+	{
+		if (!pen->pressed ||
+		    ((flags & FREERDP_PEN_BARREL_PRESSED) ^ (pen->flags & FREERDP_PEN_BARREL_PRESSED)))
+			flags = FREERDP_PEN_MOTION |
+			        (flags & (UINT32) ~(FREERDP_PEN_RELEASE | FREERDP_PEN_BARREL_PRESSED));
+		else
+			pen->flags &= (UINT32)~FREERDP_PEN_BARREL_PRESSED;
+	}
+
+	flags |= pen->flags;
 	if ((flags & FREERDP_PEN_ERASER_PRESSED) != 0)
 		penFlags |= RDPINPUT_PEN_FLAG_ERASER_PRESSED;
 	if ((flags & FREERDP_PEN_BARREL_PRESSED) != 0)
@@ -1986,7 +2056,7 @@ BOOL freerdp_client_handle_pen(rdpClientContext* cctx, UINT32 flags, INT32 devic
 	pen->last_y = y;
 	if ((flags & FREERDP_PEN_PRESS) != 0)
 	{
-		WLog_DBG(TAG, "Pen press %d", deviceid);
+		WLog_DBG(TAG, "Pen press %" PRId32, deviceid);
 		pen->hovering = FALSE;
 		pen->pressed = TRUE;
 
@@ -2061,9 +2131,9 @@ BOOL freerdp_client_pen_cancel_all(rdpClientContext* cctx)
 		FreeRDP_PenDevice* pen = &cctx->pens[i];
 		if (pen->hovering)
 		{
-			WLog_DBG(TAG, "unhover pen %d", i);
+			WLog_DBG(TAG, "unhover pen %" PRId32, pen->deviceid);
 			pen->hovering = FALSE;
-			rdpei->PenHoverCancel(rdpei, i, 0, pen->last_x, pen->last_y);
+			rdpei->PenHoverCancel(rdpei, pen->deviceid, 0, pen->last_x, pen->last_y);
 		}
 	}
 	return TRUE;

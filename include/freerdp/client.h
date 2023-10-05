@@ -175,6 +175,9 @@ extern "C"
 	FREERDP_API BOOL client_common_get_access_token(freerdp* instance, const char* request,
 	                                                char** token);
 
+	FREERDP_API SSIZE_T client_common_retry_dialog(freerdp* instance, const char* what,
+	                                               size_t current, void* userarg);
+
 	FREERDP_API void
 	freerdp_client_OnChannelConnectedEventHandler(void* context,
 	                                              const ChannelConnectedEventArgs* e);
@@ -247,10 +250,10 @@ extern "C"
 		FREERDP_PEN_RELEASE = 0x10,
 		FREERDP_PEN_BARREL_PRESSED = 0x20,
 		FREERDP_PEN_HAS_PRESSURE = 0x40,
-		FREERDP_PEN_HAS_ROTATION = 0x40,
-		FREERDP_PEN_HAS_TILTX = 0x80,
-		FREERDP_PEN_HAS_TILTY = 0x100,
-		FREERDP_PEN_IS_INVERTED = 0x200
+		FREERDP_PEN_HAS_ROTATION = 0x80,
+		FREERDP_PEN_HAS_TILTX = 0x100,
+		FREERDP_PEN_HAS_TILTY = 0x200,
+		FREERDP_PEN_IS_INVERTED = 0x400
 	} FreeRDPPenEventType;
 
 	FREERDP_API BOOL freerdp_client_handle_pen(rdpClientContext* cctx, UINT32 flags, INT32 deviceid,

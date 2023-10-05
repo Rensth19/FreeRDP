@@ -1,8 +1,9 @@
 /**
  * FreeRDP: A Remote Desktop Protocol Implementation
- * Telemetry Virtual Channel Extension
+ * Android Clipboard Redirection
  *
- * Copyright 2022 Pascal Nowack <Pascal.Nowack@gmx.de>
+ * Copyright 2013 Felix Long
+ * Copyright 2023 Iordan Iordanov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,30 +18,17 @@
  * limitations under the License.
  */
 
-#ifndef FREERDP_CHANNEL_TELEMETRY_H
-#define FREERDP_CHANNEL_TELEMETRY_H
+#ifndef FREERDP_CLIENT_IOS_CLIPRDR_H
+#define FREERDP_CLIENT_IOS_CLIPRDR_H
 
+#include <freerdp/client/cliprdr.h>
 #include <freerdp/api.h>
-#include <freerdp/dvc.h>
-#include <freerdp/types.h>
 
-#define TELEMETRY_DVC_CHANNEL_NAME "Microsoft::Windows::RDS::Telemetry"
+#include "ios_freerdp.h"
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+FREERDP_LOCAL UINT ios_cliprdr_send_client_format_list(CliprdrClientContext* cliprdr);
 
-	typedef struct
-	{
-		UINT32 PromptForCredentialsMillis;
-		UINT32 PromptForCredentialsDoneMillis;
-		UINT32 GraphicsChannelOpenedMillis;
-		UINT32 FirstGraphicsReceivedMillis;
-	} TELEMETRY_RDP_TELEMETRY_PDU;
+FREERDP_LOCAL BOOL ios_cliprdr_init(mfContext* context, CliprdrClientContext* cliprdr);
+FREERDP_LOCAL BOOL ios_cliprdr_uninit(mfContext* context, CliprdrClientContext* cliprdr);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* FREERDP_CHANNEL_TELEMETRY_H */
+#endif /* FREERDP_CLIENT_IOS_CLIPRDR_H */
